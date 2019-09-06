@@ -90,6 +90,9 @@
 				fromAPI = false,
 				virtualMode = false,
 				snapSize = null,
+				snapPoints = null,
+				currentIndex = 0,
+				previousIndex = 0,
 				requestAnimationFrame = window.requestAnimationFrame || window.webkitRequestAnimationFrame;
 
 			/**
@@ -215,15 +218,55 @@
 				}
 			}
 
-			function touchEndCalculateSpeed(inBounds) {
-				var diffTime = Date.now() - lastTime;
+			function snapPointByScrollPosition(position) {
+				position -= 180; // half of screen
+				if (snapPoints) {
+					return snapPoints.filter(function (snapPoint) {
+						return (snapPoint.position < -position &&
+							(snapPoint.position + snapPoint.length) > -position);
+					})[0];
+				}
+				return null;
+			}
 
+			function getScrollPositionByIndex(index) {
+				var result = 0;
+
+				if (snapPoints) {
+					if (index >= snapPoints.length) {
+						index = snapPoints.length - 1;
+					}
+					result = snapPoints[index].position - snapPoints[0].position;
+				}
+				return result;
+			}
+
+			function getSnapPointIndexByScrollPosition(position) {
+				var result = -1;
+
+				if (snapPoints) {
+					position -= 180; // half of screen
+					snapPoints.forEach(function (snapPoint, index) {
+						if (snapPoint.position < -position && (snapPoint.position + snapPoint.length) > -position) {
+							result = index;
+						}
+					});
+				}
+				return result;
+			}
+
+			function touchEndCalculateSpeed(inBounds) {
+				var diffTime = Date.now() - lastTime,
+					snapPoint = null;
+
+				console.log("touchEndCalculateSpeed");
 				if (inBounds && abs(lastScrollPosition / diffTime) > 1) {
 					// if it was fast move, we start animation of scrolling after touch end
 					moveToPosition = max(min(round(scrollPosition + 1000 * lastScrollPosition / diffTime),
 						0), -maxScrollPosition);
 					if (snapSize) {
 						moveToPosition = snapSize * round(moveToPosition / snapSize);
+						console.log("touchEndCalculateSpeed(fast)", moveToPosition);
 					}
 					if (abs(lastScrollPosition / diffTime) > 1) {
 						eventUtil.trigger(scrollingElement, EVENTS.SCROLL_FLICK, {
@@ -235,8 +278,18 @@
 					requestAnimationFrame(moveTo);
 				} else {
 					// touch move was slow
-					if (snapSize) {
+					if (snapPoints) {
+						console.log(currentIndex);
+						currentIndex = getSnapPointIndexByScrollPosition(scrollPosition);
+						snapPoint = snapPoints[currentIndex];
+						if (snapPoint) {
+							moveToPosition = -getScrollPositionByIndex(currentIndex);
+							console.log("touchEndCalculateSpeed(slow)", moveToPosition);
+							requestAnimationFrame(moveTo);
+						}
+					} else if (snapSize) {
 						moveToPosition = snapSize * round(scrollPosition / snapSize);
+						console.log("touchEndCalculateSpeed(slow)", moveToPosition);
 						requestAnimationFrame(moveTo);
 					}
 					isTouch = false;
@@ -244,6 +297,8 @@
 			}
 
 			function touchEndCalculatePosition(inBounds) {
+				console.log("touchEndCalculatePosition");
+
 				if (bounceBack) {
 					if (!inBounds) {
 						// if it was fast move, we start animation of scrolling after touch end
@@ -266,6 +321,7 @@
 			}
 
 			function touchEndTriggerEvents(details) {
+				console.log("touchEndTriggerEvents");
 				eventUtil.trigger(scrollingElement, EVENTS.SCROLL, details);
 				eventUtil.trigger(scrollingElement, EVENTS.SCROLL_END, details);
 			}
@@ -274,6 +330,7 @@
 			 * Handler for touchend event
 			 */
 			function touchEnd() {
+				console.log("touchEnd");
 				var inBounds,
 					scrollLeft = 0,
 					scrollTop = 0;
@@ -309,6 +366,15 @@
 				}
 			}
 
+			function getSnapSize(index) {
+				console.log("getSnapSize", snapPoints, index);
+				if (snapPoints) {
+					return Math.abs(snapPoints[previousIndex].position - snapPoints[index].position);
+				} else {
+					return snapSize;
+				}
+			}
+
 			/**
 			 * Handler for rotary event
 			 * @param {Event} event
@@ -316,14 +382,28 @@
 			function rotary(event) {
 				var eventDirection = event.detail && event.detail.direction;
 
+				previousIndex = currentIndex;
+
 				// update position by snapSize
 				if (eventDirection === "CW") {
-					moveToPosition -= snapSize || 50;
+					currentIndex++;
+					if (snapPoints && currentIndex >= snapPoints.length) {
+						currentIndex = snapPoints.length - 1;
+					}
+					snapSize = -1 * getSnapSize(currentIndex);
+
 				} else {
-					moveToPosition += snapSize || 50;
+					currentIndex--;
+					if (snapPoints && currentIndex < 0) {
+						currentIndex = 0;
+					}
+					snapSize = getSnapSize(currentIndex);
 				}
+
+				moveToPosition += snapSize;
+
 				if (snapSize) {
-					moveToPosition = snapSize * round(moveToPosition / snapSize);
+					//moveToPosition = snapSize * round(moveToPosition / snapSize);
 				}
 				if (moveToPosition < -maxScrollPosition) {
 					moveToPosition = -maxScrollPosition;
@@ -331,6 +411,7 @@
 				if (moveToPosition > 0) {
 					moveToPosition = 0;
 				}
+
 				requestAnimationFrame(moveTo);
 				requestAnimationFrame(render);
 				eventUtil.trigger(scrollingElement, EVENTS.SCROLL_START, {
@@ -663,6 +744,8 @@
 			 * @member ns.util.scrolling
 			 */
 			function scrollTo(value) {
+				console.log("scrollTo", value);
+
 				moveToPosition = value;
 				fromAPI = true;
 				eventUtil.trigger(scrollingElement, EVENTS.SCROLL_BEFORE_START, {
@@ -692,6 +775,102 @@
 				return maxScrollPosition;
 			}
 
+			function scrollToIndex(index) {
+				var previousIndex = currentIndex;
+
+				console.log("scrollToIndex", previousIndex, currentIndex);
+				currentIndex = index;
+
+				if (snapPoints) {
+					moveToPosition = snapPoints[index].position;
+					snapSize = Math.abs(snapPoints[previousIndex].position - snapPoints[index].position);
+				} else {
+					moveToPosition = snapSize * index;
+				}
+			}
+
+			/**
+			 * Update max scrolling position
+			 * @method setMaxScroll
+			 * @param {number} maxValue
+			 * @member ns.util.scrolling
+			 */
+			function setMaxScroll(maxValue) {
+				var boundingRect = scrollingElement.getBoundingClientRect(),
+					directionDimension = direction ? "width" : "height",
+					directionSize = boundingRect[directionDimension],
+					tempMaxPosition = max(maxValue - directionSize, 0);
+
+				// Change size of thumb only when necessary
+				if (tempMaxPosition !== maxScrollPosition) {
+					maxScrollPosition = tempMaxPosition || Number.POSITIVE_INFINITY;
+					if (scrollBar) {
+						if (circularScrollBar) {
+							// Calculate new thumb size based on max scrollbar size
+							circularScrollThumbSize = max((directionSize / (maxScrollPosition + directionSize)) *
+								CIRCULAR_SCROLL_BAR_SIZE, CIRCULAR_SCROLL_MIN_THUMB_SIZE);
+							maxScrollBarPosition = CIRCULAR_SCROLL_BAR_SIZE - circularScrollThumbSize;
+							polarUtil.updatePosition(svgScrollBar, "." + classes.thumb, {
+								arcStart: scrollBarPosition,
+								arcEnd: scrollBarPosition + circularScrollThumbSize,
+								r: RADIUS
+							});
+						} else {
+							directionSize -= 2 * SCROLL_MARGIN;
+							scrollThumb.style[directionDimension] =
+								(directionSize / (maxScrollPosition + directionSize) * directionSize) + "px";
+							// Cannot use direct value from style here because CSS may override the minimum
+							// size of thumb here
+							maxScrollBarPosition = directionSize -
+								scrollThumb.getBoundingClientRect()[directionDimension];
+						}
+					}
+				}
+			}
+
+			/**
+			 * Method sets snap points for scroll
+			 * @param {Array} _snapPoints
+			 * @method setSnapSize
+			 * @member ns.util.scrolling
+			 */
+			function setSnapPoints(_snapPoints) {
+				snapPoints = _snapPoints;
+				snapSize = null;
+				maxScrollPosition = (snapPoints.length) ? snapPoints.reduce(function (previousValue, value) {
+					return previousValue + value.length;
+				}, snapPoints[0].position) : 0;
+			}
+
+			/**
+			 * Method sets snap size for scroll or array of snap points
+			 * @param {number|Array} _snapSize
+			 * @method setSnapSize
+			 * @member ns.util.scrolling
+			 */
+			function setSnapSize(_snapSize) {
+				if (Array.isArray(_snapSize)) {
+					setSnapPoints(_snapSize);
+				} else {
+					snapPoints = null;
+					snapSize = _snapSize;
+					if (snapSize) {
+						maxScrollPosition = snapSize * round(maxScrollPosition / snapSize);
+					}
+				}
+			}
+
+			/**
+			 * Return true is given element is current scrolling element
+			 * @method isElement
+			 * @param {HTMLElement} element element to check
+			 * @return {boolean}
+			 * @member ns.util.scrolling
+			 */
+			function isElement(element) {
+				return scrollingElement === element;
+			}
+
 			ns.util.scrolling = {
 				getScrollPosition: getScrollPosition,
 				enable: enable,
@@ -699,62 +878,11 @@
 				enableScrollBar: enableScrollBar,
 				disableScrollBar: disableScrollBar,
 				scrollTo: scrollTo,
-				/**
-				 * Return true is given element is current scrolling element
-				 * @method isElement
-				 * @param {HTMLElement} element element to check
-				 * @return {boolean}
-				 * @member ns.util.scrolling
-				 */
-				isElement: function (element) {
-					return scrollingElement === element;
-				},
-
-				/**
-				 * Update max scrolling position
-				 * @method setMaxScroll
-				 * @param {number} maxValue
-				 * @member ns.util.scrolling
-				 */
-				setMaxScroll: function (maxValue) {
-					var boundingRect = scrollingElement.getBoundingClientRect(),
-						directionDimension = direction ? "width" : "height",
-						directionSize = boundingRect[directionDimension],
-						tempMaxPosition = max(maxValue - directionSize, 0);
-
-					// Change size of thumb only when necessary
-					if (tempMaxPosition !== maxScrollPosition) {
-						maxScrollPosition = tempMaxPosition || Number.POSITIVE_INFINITY;
-						if (scrollBar) {
-							if (circularScrollBar) {
-								// Calculate new thumb size based on max scrollbar size
-								circularScrollThumbSize = max((directionSize / (maxScrollPosition + directionSize)) *
-									CIRCULAR_SCROLL_BAR_SIZE, CIRCULAR_SCROLL_MIN_THUMB_SIZE);
-								maxScrollBarPosition = CIRCULAR_SCROLL_BAR_SIZE - circularScrollThumbSize;
-								polarUtil.updatePosition(svgScrollBar, "." + classes.thumb, {
-									arcStart: scrollBarPosition,
-									arcEnd: scrollBarPosition + circularScrollThumbSize,
-									r: RADIUS
-								});
-							} else {
-								directionSize -= 2 * SCROLL_MARGIN;
-								scrollThumb.style[directionDimension] =
-									(directionSize / (maxScrollPosition + directionSize) * directionSize) + "px";
-								// Cannot use direct value from style here because CSS may override the minimum
-								// size of thumb here
-								maxScrollBarPosition = directionSize -
-									scrollThumb.getBoundingClientRect()[directionDimension];
-							}
-						}
-					}
-				},
+				setMaxScroll: setMaxScroll,
 				getMaxScroll: getMaxScroll,
-				setSnapSize: function (setSnapSize) {
-					snapSize = setSnapSize;
-					if (snapSize) {
-						maxScrollPosition = snapSize * round(maxScrollPosition / snapSize);
-					}
-				},
+				setSnapSize: setSnapSize,
+				scrollToIndex: scrollToIndex,
+				isElement: isElement,
 				setBounceBack: function (setBounceBack) {
 					bounceBack = setBounceBack;
 				}

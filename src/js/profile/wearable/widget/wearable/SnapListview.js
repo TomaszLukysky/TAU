@@ -357,8 +357,10 @@
 					scrollPosition,
 					scrollableParentElement = self._ui.scrollableParent.element || self._ui.page;
 
+				//console.log("_listItemAnimate");
 				if (animateCallback) {
 					scrollPosition = getScrollPosition(scrollableParentElement);
+					console.log("_listItemAnimate.scrollPosition", scrollPosition);
 					utilArray.forEach(self._listItems, function (item) {
 						item.animate(scrollPosition, animateCallback);
 					});
@@ -366,6 +368,7 @@
 			};
 
 			function scrollEndCallback(self) {
+				console.log("scrollEndCallback", getScrollPosition(self._ui.scrollableParent.element));
 				if (self._isTouched === false) {
 					self._isScrollStarted = false;
 					// trigger "scrollend" event
@@ -379,6 +382,7 @@
 				var callbacks = self._callbacks,
 					scrollEndCallback = callbacks.scrollEnd;
 
+				console.log("scrollHandler");
 				if (!self._isScrollStarted) {
 					self._isScrollStarted = true;
 					utilEvent.trigger(self.element, eventType.SCROLL_START);
@@ -439,7 +443,8 @@
 					scroller,
 					visibleOffset,
 					elementHeight,
-					scrollMargin;
+					scrollMargin,
+					listItem;
 
 				// finding page  and scroller
 				ui.page = utilSelector.getClosestByClass(listview, "ui-page") || document.body;
@@ -450,14 +455,20 @@
 						scrolling.enable(scroller, "y");
 					}
 
-					elementHeight = (listview.firstElementChild) ? listview.firstElementChild.getBoundingClientRect().height : 0;
+					listItem = listview.querySelector(self.options.selector);
+					elementHeight = (listItem) ? listItem.getBoundingClientRect().height : 0;
 
 					scrollMargin = listview.getBoundingClientRect().top -
 						scroller.getBoundingClientRect().top - elementHeight / 2;
 
 					scrolling.setMaxScroll(scroller.firstElementChild.getBoundingClientRect()
 						.height + scrollMargin);
-					scrolling.setSnapSize(elementHeight);
+					scrolling.setSnapSize(self._listItems.map(function (item) {
+						return {
+							position: item.coord.top,
+							length: item.coord.height
+						};
+					}));
 
 					scroller.classList.add(classes.SNAP_CONTAINER);
 					ui.scrollableParent.element = scroller;
@@ -492,6 +503,12 @@
 						self._currentIndex = index;
 					}
 				});
+				scrolling.setSnapSize(listItems.map(function (item) {
+					return {
+						position: item.coord.top,
+						length: item.coord.height
+					};
+				}));
 
 				self._listItems = listItems;
 				self._listItemAnimate();
@@ -713,6 +730,8 @@
 
 				targetListItem = getSnapListItem(e.target, self.element);
 
+				console.log("vClickHandler", selectedIndex, targetListItem);
+
 				if (targetListItem && targetListItem.classList.contains(classes.SNAP_LISTVIEW_SELECTED)) {
 					return;
 				}
@@ -786,6 +805,7 @@
 					listItemIndex,
 					dest;
 
+				console.log("_scrollToPosition", index);
 				// if list is disabled or selected index is out of range, or item on selected index
 				// is not displayed, this function returns false
 				if (!enabled || index < 0 || index >= listItemLength || self._currentIndex === index ||
@@ -799,6 +819,7 @@
 
 				listItemIndex = listItems[index].coord;
 				dest = listItemIndex.top - scrollableParent.height / 2 + listItemIndex.height / 2;
+				console.log("_scrollToPosition.dest", dest);
 
 				scrollAnimation(scrollableParent.element, -scrollableParent.element.firstElementChild.getBoundingClientRect().top, dest, 450, callback);
 
